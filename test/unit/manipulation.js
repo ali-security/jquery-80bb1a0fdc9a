@@ -2560,3 +2560,122 @@ asyncTest( "Sanitized HTML doesn't get unsanitized by buildFragment-based method
 		start();
 	}, 1000 );
 });
+
+asyncTest( "Sanitized HTML with <option> or <optgroup> doesn't get unsanitized (gh-4647)", function() {
+
+	var container, i, j, payload,
+		counter = 0,
+		executed = {},
+		payloads = [],
+		templates = [
+			"<option><style></option></select><img src=url404 onerror=xss(#)></style>",
+			"<optgroup><style></optgroup></select><img src=url404 onerror=xss(#)></style>",
+			"<option><title></option></select><img src=url404 onerror=xss(#)></title>",
+			"<option><xmp></option></select><img src=url404 onerror=xss(#)></xmp>",
+			"<option><noembed></option></select><img src=url404 onerror=xss(#)></noembed>"
+		],
+		methods = [
+			[ "html", function( html ) {
+				jQuery("<div></div>").appendTo( container ).html( html );
+			} ],
+			[ "append", function( html ) {
+				jQuery("<div></div>").appendTo( container ).append( html );
+			} ],
+			[ "before", function( html ) {
+				jQuery("<div></div>").appendTo( container ).before( html );
+			} ],
+			[ "jQuery", function( html ) {
+				jQuery( html );
+			} ],
+			[ "jQuery.parseHTML", function( html ) {
+
+				// Use the live document as context; the default inert document
+				// never loads images, so it can't expose the payload
+				jQuery.parseHTML( html, document );
+			} ]
+		];
+
+	// Support: IE<=9
+	// Browsers that can't parse <option> outside of a select still need the wrapper
+	if ( !jQuery.support.option ) {
+		expect( 1 );
+		ok( true, "<option> can't be parsed outside of a select in this browser" );
+		start();
+		return;
+	}
+
+	expect( templates.length * methods.length );
+
+	Globals.register("xss");
+	window.xss = function( index ) {
+		executed[ index ] = true;
+	};
+
+	container = jQuery("<div></div>").appendTo("#qunit-fixture");
+
+	for ( i = 0; i < templates.length; i++ ) {
+		for ( j = 0; j < methods.length; j++ ) {
+			payload = templates[ i ].replace( "#", counter );
+			payloads.push( methods[ j ][ 0 ] + "( " + payload + " )" );
+			methods[ j ][ 1 ]( payload );
+			counter++;
+		}
+	}
+
+	setTimeout(function() {
+		for ( i = 0; i < payloads.length; i++ ) {
+			ok( !executed[ i ], "Payload #" + i + " isn't executed: " + payloads[ i ] );
+		}
+		start();
+	}, 1000 );
+});
+
+test( "<option> and <optgroup> HTML is parsed as it is outside of a select (gh-4647)", function() {
+
+	var i, j, div, expected,
+		htmlStrings = [
+			"<option><style></option></select><b>unsafe</b></style>",
+			"<optgroup><style></optgroup></select><b>unsafe</b></style>",
+			"<option><title></option></select><b>unsafe</b></title>",
+			"<option>a</option><input>",
+			"<optgroup label='g'><option>b</option></optgroup><input>"
+		],
+		methods = [
+			[ "html", function( html ) {
+				return jQuery("<div></div>").html( html ).html();
+			} ],
+			[ "append", function( html ) {
+				return jQuery("<div></div>").append( html ).html();
+			} ],
+			[ "jQuery", function( html ) {
+				return jQuery("<div></div>").append( jQuery( html ) ).html();
+			} ],
+			[ "jQuery.parseHTML", function( html ) {
+				return jQuery("<div></div>").append( jQuery( jQuery.parseHTML( html, document ) ) ).html();
+			} ]
+		];
+
+	// Support: IE<=9
+	// Browsers that can't parse <option> outside of a select still need the wrapper
+	if ( !jQuery.support.option ) {
+		expect( 1 );
+		ok( true, "<option> can't be parsed outside of a select in this browser" );
+		return;
+	}
+
+	expect( htmlStrings.length * methods.length );
+
+	for ( i = 0; i < htmlStrings.length; i++ ) {
+
+		// The browser's own parse in a generic container is what an HTML
+		// sanitizer inspects; jQuery must not reparse it in another context
+		div = document.createElement("div");
+		div.innerHTML = htmlStrings[ i ];
+		expected = div.innerHTML;
+
+		for ( j = 0; j < methods.length; j++ ) {
+			equal( methods[ j ][ 1 ]( htmlStrings[ i ] ), expected,
+				methods[ j ][ 0 ] + "( " + htmlStrings[ i ] + " )" );
+		}
+	}
+});
